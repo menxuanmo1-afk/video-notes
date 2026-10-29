@@ -1,0 +1,13 @@
+# API keys
+.streamlit/secrets.toml
+
+# Database
+*.db
+
+# Python
+__pycache__/
+*.pyc
+.env
+
+# macOS
+.DS_Store
