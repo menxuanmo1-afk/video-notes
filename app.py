@@ -242,17 +242,17 @@ if not st.session_state.video_id:
             placeholder="https://www.youtube.com/watch?v=...",
         )
         submitted = st.form_submit_button("➕ Import", type="primary", use_container_width=True)
-    if submitted:
-        if url_input:
-            vid = get_video_id(url_input)
-            if vid:
-                st.session_state.video_id = vid
-                st.session_state.processing = True
-                st.rerun()
+        if submitted:
+            if url_input:
+                vid = get_video_id(url_input)
+                if vid:
+                    st.session_state.video_id = vid
+                    st.session_state.processing = True
+                    st.rerun()
+                else:
+                    st.error("Could not find a YouTube video ID in that URL.")
             else:
-                st.error("Could not find a YouTube video ID in that URL.")
-        else:
-            st.warning("Please paste a YouTube URL first.")
+                st.warning("Please paste a YouTube URL first.")
 else:
     # Show video player (YouTube via iframe) — adaptive aspect ratio
     vid = st.session_state.video_id
@@ -265,20 +265,31 @@ else:
         height=540,
     )
 
-    # Processing status
-    if st.session_state.processing:
-        try:
-            transcript = fetch_transcript(vid)
-            st.session_state.transcript = transcript
-            st.session_state.processing = False
-            st.success(f"Transcript ready — {len(transcript.split())} words extracted.")
-        except Exception as e:
-            st.error(f"Could not extract transcript: {e}")
-            st.info("You can still take notes and ask questions about the video — the AI features that need the transcript won't be available.")
-            st.session_state.processing = False
+    # ── Transcript Input ──
+    st.markdown('<div class="section-title">📄 Paste Transcript</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-subtitle">On YouTube, click the video description → "Show transcript" → copy all text and paste it below.</div>', unsafe_allow_html=True)
+
+    if "manual_transcript" not in st.session_state:
+        st.session_state.manual_transcript = ""
+
+    transcript_input = st.text_area(
+        "Paste transcript here",
+        key="transcript_input",
+        height=150,
+        placeholder="0:00 Hello everyone, today we're going to talk about...\n0:15 First, let's understand the basics...\n...",
+    )
+
+    col_a, col_b = st.columns([1, 3])
+    with col_a:
+        if st.button("✅ Load Transcript", type="primary", use_container_width=True):
+            if transcript_input.strip():
+                st.session_state.transcript = transcript_input.strip()
+                st.success(f"Loaded — {len(transcript_input.split())} words. Scroll down to use AI features.")
+            else:
+                st.warning("Paste some transcript text first.")
 
     # If we have transcript, show AI sections
-    if st.session_state.transcript and not st.session_state.processing:
+    if st.session_state.transcript:
         transcript = st.session_state.transcript
 
         # ── Part 1: Notes ──
