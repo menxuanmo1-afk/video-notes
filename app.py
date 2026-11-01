@@ -9,7 +9,6 @@ import json
 import os
 import re
 from datetime import datetime
-from youtube_transcript_api import YouTubeTranscriptApi
 from openai import OpenAI
 
 # ─── Config ───────────────────────────────────────────────────────────
@@ -39,23 +38,94 @@ def get_video_id(url: str) -> str | None:
     return None
 
 
-def fetch_transcript(video_id: str) -> str:
-    """Fetch YouTube transcript and return as plain text."""
-    from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
-    from youtube_transcript_api.formatters import TextFormatter
+def fetch_transcript_yt_dlp(video_id: str) -> str:
+    """Fetch transcript using yt-dlp (more resilient than youtube-transcript-api)."""
+    import yt_dlp
+    
+    ydl_opts = {
+        'skip_download': True,
+        'quiet': True,
+        'no_warnings': True,
+        'writesubtitles': False,
+        'writeautomaticsub': True,
+        'subtitleslangs': ['en', 'en-US'],
+    }
+    
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    
+    # Try to get subtitles
+    subtitles = info.get('subtitles', {}) or {}
+    automatic_captions = info.get('automatic_captions', {}) or {}
+    
+    # Prefer manual subtitles, fall back to auto-generated
+    all_subs = {**automatic_captions, **subtitles}
+    
+    # Find English subtitles
+    en_keys = [k for k in all_subs if k.startswith('en')]
+    if not en_keys:
+        raise ValueError(f"No English subtitles available for this video. Video ID: {video_id}")
+    
+    # Pick the first English variant
+    chosen_key = en_keys[0]
+    sub_entries = all_subs[chosen_key]
+    
+    # Get the best quality format
+    if isinstance(sub_entries, list) and len(sub_entries) > 0:
+        best_sub = max(sub_entries, key=lambda x: x.get('ext') == 'vtt' and 1 or 0)
+    else:
+        raise ValueError(f"Malformed subtitle data for {video_id}")
+    
+    sub_url = best_sub.get('url')
+    if not sub_url:
+        raise ValueError(f"Subtitle URL not found for {video_id}")
+    
+    # Download and parse VTT/SRT
+    import urllib.request
+    
+    with urllib.request.urlopen(sub_url) as response:
+        raw = response.read().decode('utf-8')
+    
+    # Strip timestamps, keep only text
+    lines = []
+    for line in raw.split('\n'):
+        line = line.strip()
+        # Skip VTT/SRT metadata (timestamps, indexes, blank lines)
+        if not line or '-->' in line or re.match(r'^\d+$', line) or line.startswith('WEBVTT'):
+            continue
+        lines.append(line)
+    
+    return ' '.join(lines)
+
+
+def fetch_transcript_api(video_id: str) -> str:
+    """Fallback: try youtube-transcript-api."""
+    from youtube_transcript_api import YouTubeTranscriptApi
     
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
         transcript = transcript_list.find_manually_created_transcript(['en'])
-    except (NoTranscriptFound, TranscriptsDisabled):
+    except Exception:
         try:
             transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
             transcript = transcript_list.find_generated_transcript(['en'])
-        except (NoTranscriptFound, TranscriptsDisabled):
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-            transcript = transcript_list.find_transcript(['en'])
+        except Exception:
+            raise ValueError("No transcript found via API fallback either.")
     
     return ' '.join([snippet.text for snippet in transcript.fetch()])
+
+
+def fetch_transcript(video_id: str) -> str:
+    """Try yt-dlp first (more resilient), fall back to API."""
+    try:
+        return fetch_transcript_yt_dlp(video_id)
+    except Exception as e1:
+        try:
+            return fetch_transcript_api(video_id)
+        except Exception as e2:
+            raise RuntimeError(f"Could not fetch transcript: {e1}; fallback also failed: {e2}")
 
 
 def llm_call(system: str, user: str) -> str:
@@ -70,7 +140,6 @@ def llm_call(system: str, user: str) -> str:
         max_tokens=1500,
     )
     raw = resp.choices[0].message.content.strip()
-    # Strip markdown code fences if present
     if raw.startswith("```"):
         raw = raw.split("```", 1)[1]
         if raw.startswith("json"):
@@ -137,7 +206,6 @@ def init_db():
 def save_archive(url, video_id, transcript, story, system_map, n1, n2, n3, title=""):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    # Check if already exists
     c.execute("SELECT id FROM archives WHERE video_id = ?", (video_id,))
     row = c.fetchone()
     if row:
@@ -244,29 +312,28 @@ with st.sidebar:
 
 # ─── Main Area ────────────────────────────────────────────────────────
 
-# Section: Video Import
 st.markdown("### 📺 Video")
+
 if not st.session_state.video_id:
-    # Show upload zone
-    with st.form("import_form"):
+    # Step 1: Input URL
+    with st.form("import_form", clear_on_submit=False):
         url_input = st.text_input(
-            "Paste a YouTube URL to get started",
+            "Paste a YouTube URL",
             placeholder="https://www.youtube.com/watch?v=...",
         )
         submitted = st.form_submit_button("➕ Import", type="primary", use_container_width=True)
-        if submitted:
-            if url_input:
-                vid = get_video_id(url_input)
-                if vid:
-                    st.session_state.video_id = vid
-                    st.session_state.processing = True
-                    st.rerun()
-                else:
-                    st.error("Could not find a YouTube video ID in that URL.")
+        if submitted and url_input:
+            vid = get_video_id(url_input)
+            if vid:
+                st.session_state.video_id = vid
+                st.session_state.processing = True
+                st.rerun()
             else:
-                st.warning("Please paste a YouTube URL first.")
+                st.error("Could not find a YouTube video ID in that URL.")
+        elif submitted and not url_input:
+            st.warning("Please paste a YouTube URL first.")
 else:
-    # Show video player (YouTube via iframe) — adaptive aspect ratio
+    # Video is loaded — show player
     vid = st.session_state.video_id
     st.components.v1.html(
         f'<div style="position:relative;width:100%;padding-top:56.25%;max-width:960px;">'
@@ -277,60 +344,47 @@ else:
         height=540,
     )
 
-    # ── Transcript: Auto-extract or manual fallback ──
+    # Auto-fetch transcript
     if not st.session_state.transcript and not st.session_state.processing:
-        st.markdown('<div class="section-title">📄 Step 1: Get the Transcript</div>', unsafe_allow_html=True)
-        
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            if st.button("🤖 Auto-extract", type="primary", use_container_width=True):
-                st.session_state.processing = True
-                st.rerun()
-        with col2:
-            st.markdown('<div style="text-align:center;padding-top:8px;color:#999;font-size:0.85rem;">or paste manually ↓</div>', unsafe_allow_html=True)
+        st.session_state.processing = True
+        st.rerun()
 
-    # Auto-extract in progress
     if st.session_state.processing:
         try:
             transcript = fetch_transcript(vid)
             st.session_state.transcript = transcript
             st.session_state.processing = False
-            st.success(f"✅ Transcript loaded — {len(transcript.split())} words. Scroll down for AI features.")
+            st.success(f"✅ Transcript loaded — {len(transcript.split())} words. AI features unlocked below.")
             st.rerun()
         except Exception as e:
             st.session_state.processing = False
-            st.error(f"Auto-extract failed: {e}")
-            st.info("No worries — use the manual paste option below.")
+            st.error(f"Could not auto-extract transcript: {e}")
+            # Show manual fallback
+            st.markdown("---")
+            st.markdown("**Fallback: paste transcript manually**")
+            st.caption("On YouTube: click the video ··· menu → Show transcript → copy all text → paste below")
+            manual_input = st.text_area(
+                "Paste transcript here",
+                height=150,
+                placeholder="Paste the transcript text here...",
+                key="manual_fallback",
+            )
+            if st.button("✅ Use this transcript", type="primary"):
+                if manual_input.strip():
+                    st.session_state.transcript = manual_input.strip()
+                    st.success(f"✅ Loaded — {len(manual_input.split())} words. Scroll down for AI features.")
+                    st.rerun()
+                else:
+                    st.warning("Please paste some text first.")
 
-    # Manual paste fallback (always shown if no transcript yet)
-    if not st.session_state.transcript:
-        st.markdown("---")
-        st.markdown("**Paste transcript manually**")
-        st.caption("On YouTube, click the video ··· menu → Show transcript → copy all text → paste below")
-        
-        manual_input = st.text_area(
-            "Transcript text",
-            height=150,
-            placeholder="0:00 Hello everyone, today we're talking about...\n0:15 First, let's understand...",
-            key="manual_transcript_input",
-        )
-        if st.button("✅ Use this transcript", type="primary"):
-            if manual_input.strip():
-                st.session_state.transcript = manual_input.strip()
-                st.success(f"✅ Loaded — {len(manual_input.split())} words. Scroll down for AI features.")
-                st.rerun()
-            else:
-                st.warning("Paste some text first.")
-
-    # If we have transcript, show AI sections
+    # ─ AI Features ──
     if st.session_state.transcript:
         transcript = st.session_state.transcript
 
-        # ── Part 1: Notes ──
+        # Part 1: Notes
         st.markdown('<div class="section-title">✍️ Make It Yours</div>', unsafe_allow_html=True)
         st.markdown('<div class="section-subtitle">Close the tab. Explain the idea out loud, from memory, as if teaching someone who has never seen the video — the Feynman Technique. Then write down what you got, and what it connects to in your own knowledge and experience.</div>', unsafe_allow_html=True)
 
-        # Initialize note value in session state
         if "notes" not in st.session_state:
             st.session_state.notes = ""
 
@@ -341,7 +395,7 @@ else:
             placeholder="What's the core idea in your own words?\nWhat does it connect to in what you already know?\nHow would you explain this to someone who hasn't watched?",
         )
 
-        # ── Part 2: AI Supplement ──
+        # Part 2: AI Supplement
         col_a, col_b = st.columns([1, 1])
         with col_a:
             if st.button("Reveal the System Map", type="primary", use_container_width=True):
@@ -358,7 +412,7 @@ else:
                     with st.spinner("Generating questions..."):
                         st.session_state.quiz = generate_quiz(transcript)
 
-        # Show results if generated
+        # Show results
         if st.session_state.story_skeleton:
             st.markdown('<div class="section-title">🗺️ The System Map</div>', unsafe_allow_html=True)
 
@@ -368,7 +422,6 @@ else:
             with st.expander("System Map — what was left out"):
                 st.markdown(st.session_state.system_map)
 
-            # Compare with user notes
             if user_notes:
                 with st.spinner("Finding the gaps between your notes and the system..."):
                     gap_analysis = llm_call(
@@ -395,7 +448,7 @@ else:
                             label_visibility="collapsed",
                         )
                         if chosen:
-                            chosen_letter = chosen[0]  # "A", "B", "C", or "D"
+                            chosen_letter = chosen[0]
                             correct = chosen_letter == q['answer']
                             color = "#4caf50" if correct else "#f44336"
                             icon = "✅" if correct else "❌"
@@ -411,7 +464,7 @@ else:
             except (json.JSONDecodeError, KeyError, TypeError):
                 st.markdown(st.session_state.quiz)
 
-        # ── Part 3: Ask AI ──
+        # Part 3: Ask AI
         st.markdown('<div class="section-title">💬 Ask AI</div>', unsafe_allow_html=True)
         st.markdown('<div class="section-subtitle">Any question about this video. No judgment.</div>', unsafe_allow_html=True)
 
@@ -425,13 +478,13 @@ else:
                     )
                 st.markdown(f'<div class="ai-response">{answer}</div>', unsafe_allow_html=True)
 
-        # ── Archive ──
+        # Archive
         st.markdown("---")
         if st.button("💾 Archive this video + notes", type="primary", use_container_width=True):
             save_archive(
                 url=f"https://youtube.com/watch?v={vid}",
                 video_id=vid,
-                transcript=transcript[:10000],  # truncate for storage
+                transcript=transcript[:10000],
                 story=st.session_state.story_skeleton,
                 system_map=st.session_state.system_map,
                 n1=user_notes[:500] if user_notes else "",
