@@ -293,12 +293,6 @@ st.markdown("""
         margin: 8px 0;
     }
     textarea.st-emotion-cache { font-size: 1rem !important; }
-    /* Tighten spacing: remove gaps around iframe and between sections */
-    .element-container { margin-bottom: 0 !important; margin-top: 0 !important; padding-bottom: 0 !important; }
-    iframe { display: block; margin-bottom: -12px !important; }
-    .block-container { padding-top: 0.5rem; padding-bottom: 0.5rem; }
-    /* Hide Streamlit branding footer */
-    footer { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -347,7 +341,7 @@ else:
         f'src="https://www.youtube.com/embed/{vid}?autoplay=0" '
         f'allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" '
         f'allowfullscreen></iframe></div>',
-        height=1,
+        height=300,
     )
 
     # Auto-fetch transcript
