@@ -337,11 +337,11 @@ else:
     vid = st.session_state.video_id
     st.components.v1.html(
         f'<div style="position:relative;width:100%;padding-top:56.25%;max-width:960px;">'
-        f'<iframe style="position:absolute;top:0;left:0;width:100%;height:100%;" '
+        f'<iframe style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;" '
         f'src="https://www.youtube.com/embed/{vid}?autoplay=0" '
-        f'frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" '
+        f'allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" '
         f'allowfullscreen></iframe></div>',
-        height=540,
+        height=320,
     )
 
     # Auto-fetch transcript
