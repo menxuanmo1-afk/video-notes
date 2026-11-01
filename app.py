@@ -236,32 +236,33 @@ with st.sidebar:
 st.markdown("### 📺 Video")
 if not st.session_state.video_id:
     # Show upload zone
-    url_input = st.text_input(
-        "Paste a YouTube URL to get started",
-        placeholder="https://www.youtube.com/watch?v=...",
-        key="url_input",
-    )
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        if st.button("➕ Import", type="primary", use_container_width=True):
-            if url_input:
-                vid = get_video_id(url_input)
-                if vid:
-                    st.session_state.video_id = vid
-                    st.session_state.processing = True
-                    st.rerun()
-                else:
-                    st.error("Could not find a YouTube video ID in that URL.")
+    with st.form("import_form"):
+        url_input = st.text_input(
+            "Paste a YouTube URL to get started",
+            placeholder="https://www.youtube.com/watch?v=...",
+        )
+        submitted = st.form_submit_button("➕ Import", type="primary", use_container_width=True)
+    if submitted:
+        if url_input:
+            vid = get_video_id(url_input)
+            if vid:
+                st.session_state.video_id = vid
+                st.session_state.processing = True
+                st.rerun()
             else:
-                st.warning("Please paste a YouTube URL first.")
+                st.error("Could not find a YouTube video ID in that URL.")
+        else:
+            st.warning("Please paste a YouTube URL first.")
 else:
-    # Show video player (YouTube via iframe)
+    # Show video player (YouTube via iframe) — adaptive aspect ratio
     vid = st.session_state.video_id
     st.components.v1.html(
-        f'<iframe width="100%" height="480" src="https://www.youtube.com/embed/{vid}?autoplay=0" '
+        f'<div style="position:relative;width:100%;padding-top:56.25%;max-width:960px;">'
+        f'<iframe style="position:absolute;top:0;left:0;width:100%;height:100%;" '
+        f'src="https://www.youtube.com/embed/{vid}?autoplay=0" '
         f'frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" '
-        f'allowfullscreen></iframe>',
-        height=520,
+        f'allowfullscreen></iframe></div>',
+        height=540,
     )
 
     # Processing status
@@ -283,31 +284,18 @@ else:
         transcript = st.session_state.transcript
 
         # ── Part 1: Notes ──
-        st.markdown('<div class="section-title">✍️ Your Three Sentences</div>', unsafe_allow_html=True)
-        st.markdown('<div class="section-subtitle">Retell the video\'s content in your own words — before seeing what AI says. This is where the story becomes your system.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">✍️ Make It Yours</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-subtitle">Close the tab. Explain the idea out loud, from memory, as if teaching someone who has never seen the video — the Feynman Technique. Then write down what you got, and what it connects to in your own knowledge and experience.</div>', unsafe_allow_html=True)
 
-        # Initialize note values in session state
-        for nk in ["note1", "note2", "note3"]:
-            if nk not in st.session_state:
-                st.session_state[nk] = ""
+        # Initialize note value in session state
+        if "notes" not in st.session_state:
+            st.session_state.notes = ""
 
-        n1 = st.text_area(
-            "1. The core idea — in your own words, not the video's script",
-            key="note1",
-            height=80,
-            placeholder="Not the plot. The idea.",
-        )
-        n2 = st.text_area(
-            "2. Where this connects to what you already know",
-            key="note2",
-            height=80,
-            placeholder="Where the story starts joining your existing system...",
-        )
-        n3 = st.text_area(
-            "3. How you'd explain this to someone who hasn't watched",
-            key="note3",
-            height=80,
-            placeholder="If you had 30 seconds to make them understand...",
+        user_notes = st.text_area(
+            "",
+            key="notes",
+            height=200,
+            placeholder="What's the core idea in your own words?\nWhat does it connect to in what you already know?\nHow would you explain this to someone who hasn't watched?",
         )
 
         # ── Part 2: AI Supplement ──
@@ -338,13 +326,12 @@ else:
                 st.markdown(st.session_state.system_map)
 
             # Compare with user notes
-            if n1 or n2 or n3:
-                user_text = f"{n1}\n{n2}\n{n3}"
+            if user_notes:
                 with st.spinner("Finding the gaps between your notes and the system..."):
                     gap_analysis = llm_call(
                         "Compare the user's notes with the full system map. Identify 2-3 specific gaps — connections, conditions, or distinctions the user missed. "
                         "Be specific and constructive. No scores, no grades. Just: 'here's what's missing.' ~100 words.",
-                        f"User's notes:\n{user_text}\n\nSystem map:\n{st.session_state.system_map[:2000]}"
+                        f"User's notes:\n{user_notes}\n\nSystem map:\n{st.session_state.system_map[:2000]}"
                     )
                 st.markdown('<div class="section-title">🔍 Your Gaps</div>', unsafe_allow_html=True)
                 st.markdown(f'<div class="gap-highlight">{gap_analysis}</div>', unsafe_allow_html=True)
@@ -404,6 +391,8 @@ else:
                 transcript=transcript[:10000],  # truncate for storage
                 story=st.session_state.story_skeleton,
                 system_map=st.session_state.system_map,
-                n1=n1, n2=n2, n3=n3,
+                n1=user_notes[:500] if user_notes else "",
+                n2="",
+                n3="",
             )
             st.success("Archived! Find it in the sidebar.")
