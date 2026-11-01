@@ -265,12 +265,12 @@ st.markdown("""
         font-size: 1.4rem;
         font-weight: 600;
         margin-bottom: 0.5rem;
-        margin-top: 1.5rem;
+        margin-top: 0.5rem;
     }
     .section-subtitle {
         color: #999;
         font-size: 0.9rem;
-        margin-bottom: 1rem;
+        margin-bottom: 0.5rem;
     }
     .note-box {
         background: rgba(255,255,255,0.04);
@@ -293,6 +293,9 @@ st.markdown("""
         margin: 8px 0;
     }
     textarea.st-emotion-cache { font-size: 1rem !important; }
+    /* Tighten spacing between video and content */
+    .element-container { margin-bottom: 0 !important; }
+    div[data-testid="stVerticalBlock"] > div { padding-bottom: 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -341,7 +344,7 @@ else:
         f'src="https://www.youtube.com/embed/{vid}?autoplay=0" '
         f'allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" '
         f'allowfullscreen></iframe></div>',
-        height=320,
+        height=0,
     )
 
     # Auto-fetch transcript
@@ -354,7 +357,6 @@ else:
             transcript = fetch_transcript(vid)
             st.session_state.transcript = transcript
             st.session_state.processing = False
-            st.success(f"✅ Transcript loaded — {len(transcript.split())} words. AI features unlocked below.")
             st.rerun()
         except Exception as e:
             st.session_state.processing = False
