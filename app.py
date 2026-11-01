@@ -41,9 +41,21 @@ def get_video_id(url: str) -> str | None:
 
 def fetch_transcript(video_id: str) -> str:
     """Fetch YouTube transcript and return as plain text."""
-    api = YouTubeTranscriptApi()
-    transcript = api.fetch(video_id, languages=['en'])
-    return ' '.join([snippet.text for snippet in transcript.snippets])
+    from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+    from youtube_transcript_api.formatters import TextFormatter
+    
+    try:
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript = transcript_list.find_manually_created_transcript(['en'])
+    except (NoTranscriptFound, TranscriptsDisabled):
+        try:
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            transcript = transcript_list.find_generated_transcript(['en'])
+        except (NoTranscriptFound, TranscriptsDisabled):
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            transcript = transcript_list.find_transcript(['en'])
+    
+    return ' '.join([snippet.text for snippet in transcript.fetch()])
 
 
 def llm_call(system: str, user: str) -> str:
@@ -265,28 +277,50 @@ else:
         height=540,
     )
 
-    # ── Transcript Input ──
-    st.markdown('<div class="section-title">📄 Paste Transcript</div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-subtitle">On YouTube, click the video description → "Show transcript" → copy all text and paste it below.</div>', unsafe_allow_html=True)
+    # ── Transcript: Auto-extract or manual fallback ──
+    if not st.session_state.transcript and not st.session_state.processing:
+        st.markdown('<div class="section-title">📄 Step 1: Get the Transcript</div>', unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            if st.button("🤖 Auto-extract", type="primary", use_container_width=True):
+                st.session_state.processing = True
+                st.rerun()
+        with col2:
+            st.markdown('<div style="text-align:center;padding-top:8px;color:#999;font-size:0.85rem;">or paste manually ↓</div>', unsafe_allow_html=True)
 
-    if "manual_transcript" not in st.session_state:
-        st.session_state.manual_transcript = ""
+    # Auto-extract in progress
+    if st.session_state.processing:
+        try:
+            transcript = fetch_transcript(vid)
+            st.session_state.transcript = transcript
+            st.session_state.processing = False
+            st.success(f"✅ Transcript loaded — {len(transcript.split())} words. Scroll down for AI features.")
+            st.rerun()
+        except Exception as e:
+            st.session_state.processing = False
+            st.error(f"Auto-extract failed: {e}")
+            st.info("No worries — use the manual paste option below.")
 
-    transcript_input = st.text_area(
-        "Paste transcript here",
-        key="transcript_input",
-        height=150,
-        placeholder="0:00 Hello everyone, today we're going to talk about...\n0:15 First, let's understand the basics...\n...",
-    )
-
-    col_a, col_b = st.columns([1, 3])
-    with col_a:
-        if st.button("✅ Load Transcript", type="primary", use_container_width=True):
-            if transcript_input.strip():
-                st.session_state.transcript = transcript_input.strip()
-                st.success(f"Loaded — {len(transcript_input.split())} words. Scroll down to use AI features.")
+    # Manual paste fallback (always shown if no transcript yet)
+    if not st.session_state.transcript:
+        st.markdown("---")
+        st.markdown("**Paste transcript manually**")
+        st.caption("On YouTube, click the video ··· menu → Show transcript → copy all text → paste below")
+        
+        manual_input = st.text_area(
+            "Transcript text",
+            height=150,
+            placeholder="0:00 Hello everyone, today we're talking about...\n0:15 First, let's understand...",
+            key="manual_transcript_input",
+        )
+        if st.button("✅ Use this transcript", type="primary"):
+            if manual_input.strip():
+                st.session_state.transcript = manual_input.strip()
+                st.success(f"✅ Loaded — {len(manual_input.split())} words. Scroll down for AI features.")
+                st.rerun()
             else:
-                st.warning("Paste some transcript text first.")
+                st.warning("Paste some text first.")
 
     # If we have transcript, show AI sections
     if st.session_state.transcript:
