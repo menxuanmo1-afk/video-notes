@@ -267,17 +267,15 @@ else:
 
     # Processing status
     if st.session_state.processing:
-        with st.spinner("Extracting transcript..."):
-            try:
-                transcript = fetch_transcript(vid)
-                st.session_state.transcript = transcript
-                st.session_state.processing = False
-                st.success(f"Transcript ready — {len(transcript.split())} words extracted.")
-            except Exception as e:
-                st.error(f"Could not extract transcript: {e}")
-                st.info("Try a different video or check the URL.")
-                st.session_state.video_id = None
-                st.rerun()
+        try:
+            transcript = fetch_transcript(vid)
+            st.session_state.transcript = transcript
+            st.session_state.processing = False
+            st.success(f"Transcript ready — {len(transcript.split())} words extracted.")
+        except Exception as e:
+            st.error(f"Could not extract transcript: {e}")
+            st.info("You can still take notes and ask questions about the video — the AI features that need the transcript won't be available.")
+            st.session_state.processing = False
 
     # If we have transcript, show AI sections
     if st.session_state.transcript and not st.session_state.processing:
